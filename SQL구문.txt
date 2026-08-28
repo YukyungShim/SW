@@ -26,13 +26,19 @@
     
     -- 3. Row Level Security (RLS) 활성화
     ALTER TABLE public.neon_worm_leaderboard ENABLE ROW LEVEL SECURITY;
-    
-    -- 4. RLS 읽기/쓰기 정책 허용
-    DROP POLICY IF EXISTS "Allow public read" ON public.neon_worm_leaderboard;
-    CREATE POLICY "Allow public read" ON public.neon_worm_leaderboard FOR SELECT USING (true);
-    
-    DROP POLICY IF EXISTS "Allow public insert" ON public.neon_worm_leaderboard;
-    CREATE POLICY "Allow public insert" ON public.neon_worm_leaderboard FOR INSERT WITH CHECK (true);
-    
-    DROP POLICY IF EXISTS "Allow public update" ON public.neon_worm_leaderboard;
-    CREATE POLICY "Allow public update" ON public.neon_worm_leaderboard FOR UPDATE USING (true) WITH CHECK (true);
+
+
+
+
+    -- 1. 누구나 랭킹을 조회할 수 있도록 읽기(SELECT) 정책 추가
+CREATE POLICY "Allow public read access" 
+ON public.neon_worm_leaderboard
+FOR SELECT 
+USING (true);
+
+-- 2. 프론트엔드에서 점수를 등록하고 갱신할 수 있도록 쓰기(INSERT/UPDATE) 정책 추가
+CREATE POLICY "Allow public insert and update" 
+ON public.neon_worm_leaderboard
+FOR ALL 
+USING (true)
+WITH CHECK (true);

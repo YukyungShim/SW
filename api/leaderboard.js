@@ -76,13 +76,11 @@ export default async function handler(request, response) {
       }
 
       // 기존 닉네임 기록 조회
-      const { data: existingUser, error: checkError } = await supabase
+      const { data: existingUser } = await supabase
         .from(PRIMARY_TABLE)
-        .select('*')
+        .select('time_ms')
         .ilike('name', cleanName)
         .maybeSingle();
-
-      if (checkError) throw checkError;
 
       const recordData = {
         name: cleanName,
@@ -96,26 +94,15 @@ export default async function handler(request, response) {
       let status = 'inserted';
       let finalBest = numericTime;
 
-      if (!existingUser) {
-        // 1. 신규 파일럿인 경우: INSERT
-        const { error: insertError } = await supabase
+      // 신규 유저이거나 이전 최고기록보다 높은 경우 upsert 실행
+      if (!existingUser || numericTime > existingUser.time_ms) {
+        const { error: upsertError } = await supabase
           .from(PRIMARY_TABLE)
-          .insert(recordData);
+          .upsert(recordData, { onConflict: 'name' });
 
-        if (insertError) throw insertError;
-        status = 'inserted';
-      } else if (numericTime > existingUser.time_ms) {
-        // 2. 기존 기록보다 더 긴 생존 시간 달성 시: UPDATE
-        const { error: updateError } = await supabase
-          .from(PRIMARY_TABLE)
-          .update(recordData)
-          .ilike('name', cleanName);
-
-        if (updateError) throw updateError;
-        status = 'updated';
-        finalBest = numericTime;
+        if (upsertError) throw upsertError;
+        status = existingUser ? 'updated' : 'inserted';
       } else {
-        // 3. 기존 최고 기록이 더 높은 경우: 유지
         status = 'kept';
         finalBest = existingUser.time_ms;
       }

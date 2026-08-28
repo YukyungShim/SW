@@ -358,28 +358,20 @@
   // ==========================================
   // 6. 랭킹 시스템 (Supabase 클라우드 & 로컬 폴백)
   // ==========================================
-  const DEFAULT_LEADERBOARD = [
-    { name: 'CYBER_VIPER', timeMs: 142580, apples: 38, date: '2026-08-20' },
-    { name: 'NEON_GHOST',  timeMs: 112340, apples: 29, date: '2026-08-22' },
-    { name: 'SYNTH_PULSE', timeMs: 95400,  apples: 24, date: '2026-08-23' },
-    { name: 'CHROME_SLICK',timeMs: 78920,  apples: 19, date: '2026-08-25' },
-    { name: 'GRID_RUNNER', timeMs: 62100,  apples: 15, date: '2026-08-26' },
-    { name: 'PIXEL_STORM', timeMs: 48300,  apples: 11, date: '2026-08-26' },
-    { name: 'NEO_GLITCH',  timeMs: 34500,  apples: 8,  date: '2026-08-27' },
-    { name: 'DATA_BYTE',   timeMs: 22100,  apples: 5,  date: '2026-08-27' }
-  ];
+  const DUMMY_NAMES = ['CYBER_VIPER', 'NEON_GHOST', 'SYNTH_PULSE', 'CHROME_SLICK', 'GRID_RUNNER', 'PIXEL_STORM', 'NEO_GLITCH', 'DATA_BYTE'];
+  const DEFAULT_LEADERBOARD = [];
 
   function getLocalScores() {
     try {
       const data = localStorage.getItem(STORAGE_KEY);
-      if (!data) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_LEADERBOARD));
-        return [...DEFAULT_LEADERBOARD];
-      }
+      if (!data) return [];
       const parsed = JSON.parse(data);
-      return Array.isArray(parsed) ? parsed : [...DEFAULT_LEADERBOARD];
+      if (!Array.isArray(parsed)) return [];
+      // 가짜 더미 데이터 제거 (실제 유저 기록만 보존)
+      const realOnly = parsed.filter(item => !DUMMY_NAMES.includes(item.name));
+      return realOnly;
     } catch (e) {
-      return [...DEFAULT_LEADERBOARD];
+      return [];
     }
   }
 
@@ -458,53 +450,41 @@
   async function saveScore(entry) {
     let resultMsg = '';
 
-    // 1. Direct Supabase Client 연동 (표준 테이블 Select -> Insert / Update, RPC 함수 불필요)
+    // 1. Direct Supabase Client 연동 (.upsert 및 onConflict 적용)
     if (directSupabase) {
       try {
         rankNotice.textContent = '📡 Supabase 서버에 생존 기록 동기화 중…';
 
-        const { data: existingUser, error: checkError } = await directSupabase
+        // 기존 닉네임 기록 확인
+        const { data: existingUser } = await directSupabase
           .from(SUPABASE_TABLE)
-          .select('*')
+          .select('time_ms')
           .ilike('name', entry.name)
           .maybeSingle();
 
-        if (checkError) throw checkError;
-
         let status = 'inserted';
-        let prevTime = 0;
+        let prevTime = existingUser ? existingUser.time_ms : 0;
 
-        if (!existingUser) {
-          const { error: insertError } = await directSupabase
+        // 신규 유저이거나 이전 기록보다 높은 생존 시간일 때만 upsert 실행
+        if (!existingUser || entry.timeMs > existingUser.time_ms) {
+          const { error: upsertError } = await directSupabase
             .from(SUPABASE_TABLE)
-            .insert({
-              name: entry.name,
-              time_ms: entry.timeMs,
-              apples: entry.apples,
-              score: entry.score,
-              hazard_level: entry.hazardLevel || hazardLevel || 1,
-              played_at: new Date().toISOString()
-            });
+            .upsert(
+              {
+                name: entry.name,
+                time_ms: entry.timeMs,
+                apples: entry.apples,
+                score: entry.score,
+                hazard_level: entry.hazardLevel || hazardLevel || 1,
+                played_at: new Date().toISOString()
+              },
+              { onConflict: 'name' }
+            );
 
-          if (insertError) throw insertError;
-          status = 'inserted';
-        } else if (entry.timeMs > existingUser.time_ms) {
-          const { error: updateError } = await directSupabase
-            .from(SUPABASE_TABLE)
-            .update({
-              time_ms: entry.timeMs,
-              apples: entry.apples,
-              score: entry.score,
-              hazard_level: entry.hazardLevel || hazardLevel || 1,
-              played_at: new Date().toISOString()
-            })
-            .ilike('name', entry.name);
-
-          if (updateError) throw updateError;
-          status = 'updated';
+          if (upsertError) throw upsertError;
+          status = existingUser ? 'updated' : 'inserted';
         } else {
           status = 'kept';
-          prevTime = existingUser.time_ms;
         }
 
         if (status === 'inserted') {
@@ -520,7 +500,7 @@
         await loadAndRenderScores();
         return;
       } catch (err) {
-        console.warn('Direct Supabase save error, falling back:', err);
+        console.warn('Direct Supabase upsert error, falling back:', err);
       }
     }
 
