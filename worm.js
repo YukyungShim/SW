@@ -33,7 +33,6 @@
   // 랭킹 리더보드
   const rankingList = document.querySelector('#rankingList');
   const rankNotice = document.querySelector('#rankNotice');
-  const resetRankBtn = document.querySelector('#resetRankBtn');
 
   // 모달 오버레이
   const startScreen = document.querySelector('#startScreen');
@@ -1493,19 +1492,6 @@
   pauseBtn.addEventListener('click', () => {
     playSound('click');
     togglePause();
-  });
-
-  resetRankBtn.addEventListener('click', () => {
-    playSound('click');
-    if (confirm('모든 생존 랭킹 기록을 초기화하시겠습니까?')) {
-      try {
-        localStorage.removeItem(STORAGE_KEY);
-      } catch (e) {}
-      renderScores(getScores());
-      updateBestTime();
-      rankNotice.textContent = '랭킹이 초기 기본값으로 리셋되었습니다.';
-      setTimeout(() => { rankNotice.textContent = ''; }, 3000);
-    }
   });
 
   // 오디오 토글
