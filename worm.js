@@ -333,7 +333,7 @@
   }
 
   // ==========================================
-  // 6. 랭킹 시스템 (로컬 스토리지 & 생존 시간 기준)
+  // 6. 랭킹 시스템 (Supabase 클라우드 & 로컬 폴백)
   // ==========================================
   const DEFAULT_LEADERBOARD = [
     { name: 'CYBER_VIPER', timeMs: 142580, apples: 38, date: '2026-08-20' },
@@ -346,7 +346,7 @@
     { name: 'DATA_BYTE',   timeMs: 22100,  apples: 5,  date: '2026-08-27' }
   ];
 
-  function getScores() {
+  function getLocalScores() {
     try {
       const data = localStorage.getItem(STORAGE_KEY);
       if (!data) {
@@ -360,9 +360,8 @@
     }
   }
 
-  function saveScore(entry) {
-    const scores = getScores();
-    // 같은 닉네임이 있다면 더 좋은 생존 시간일 때만 교체
+  function saveLocalScore(entry) {
+    const scores = getLocalScores();
     const existingIndex = scores.findIndex(s => s.name.toUpperCase() === entry.name.toUpperCase());
     if (existingIndex !== -1) {
       if (entry.timeMs > scores[existingIndex].timeMs) {
@@ -371,19 +370,90 @@
     } else {
       scores.push(entry);
     }
-    // 생존 시간(ms) 내림차순 정렬
     scores.sort((a, b) => b.timeMs - a.timeMs);
     const top10 = scores.slice(0, 10);
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(top10));
     } catch (e) {}
-    renderScores(top10);
-    updateBestTime();
+    return top10;
   }
 
-  function renderScores(scores = getScores()) {
+  async function fetchLeaderboardScores() {
+    // 1. 서버리스 API 엔드포인트 (/api/leaderboard) 호출 시도 (.env 환경변수 기반)
+    try {
+      const response = await fetch('/api/leaderboard', { cache: 'no-store' });
+      if (response.ok) {
+        const result = await response.json();
+        if (result && Array.isArray(result.scores)) {
+          const formatted = result.scores.map(item => ({
+            name: item.name,
+            timeMs: item.time_ms,
+            apples: item.apples ?? 0,
+            score: item.score ?? 0,
+            hazardLevel: item.hazard_level ?? 1,
+            date: item.played_at ? item.played_at.split('T')[0] : ''
+          }));
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(formatted)); } catch (e) {}
+          return formatted;
+        }
+      }
+    } catch (apiErr) {
+      // 로컬 파일 실행(file://) 등 API 미지원 환경 시 로컬 스토리지로 진행
+    }
+
+    return getLocalScores();
+  }
+
+  async function saveScore(entry) {
+    let resultMsg = '';
+
+    // 1. 서버리스 API 엔드포인트 (/api/leaderboard) 호출 시도
+    try {
+      rankNotice.textContent = '📡 Supabase 서버에 생존 기록 동기화 중…';
+      const response = await fetch('/api/leaderboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: entry.name,
+          timeMs: entry.timeMs,
+          apples: entry.apples,
+          score: entry.score,
+          hazardLevel: entry.hazardLevel || hazardLevel || 1
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.status === 'inserted') {
+          resultMsg = `🏆 ${entry.name} 파일럿 신규 랭킹 등록 완료! (${formatTime(entry.timeMs)})`;
+        } else if (result.status === 'updated') {
+          resultMsg = `🔥 ${entry.name} 파일럿 최고 생존 기록 갱신! (${formatTime(entry.timeMs)})`;
+        } else if (result.status === 'kept') {
+          resultMsg = `ℹ️ ${entry.name} 파일럿의 기존 최고 기록(${formatTime(result.time_ms)})이 더 높아 유지되었습니다.`;
+        } else {
+          resultMsg = `⚡ ${entry.name} 파일럿의 기록이 Supabase에 성공적으로 저장되었습니다!`;
+        }
+
+        rankNotice.textContent = resultMsg;
+        setTimeout(() => { rankNotice.textContent = ''; }, 4500);
+        await loadAndRenderScores();
+        return;
+      }
+    } catch (e) {
+      // API 통신 불가 시 로컬스토리지 모드로 처리
+    }
+
+    // 2. 로컬스토리지 폴백 저장
+    saveLocalScore(entry);
+    resultMsg = `⚡ ${entry.name} 파일럿의 기록(${formatTime(entry.timeMs)})이 로컬에 등록되었습니다!`;
+    rankNotice.textContent = resultMsg;
+    setTimeout(() => { rankNotice.textContent = ''; }, 4500);
+    await loadAndRenderScores();
+  }
+
+  function renderScores(scores = []) {
     rankingList.innerHTML = '';
-    if (!scores.length) {
+    if (!scores || !scores.length) {
       rankingList.innerHTML = '<li class="empty">등록된 랭킹 기록이 없습니다.</li>';
       return;
     }
@@ -400,14 +470,19 @@
     });
   }
 
-  function updateBestTime() {
-    const scores = getScores();
+  function updateBestTime(scores = []) {
     if (scores.length > 0) {
       personalBestMs = scores[0].timeMs;
       bestTimeDisplay.textContent = formatTime(personalBestMs);
     } else {
       bestTimeDisplay.textContent = '00:00.00';
     }
+  }
+
+  async function loadAndRenderScores() {
+    const scores = await fetchLeaderboardScores();
+    renderScores(scores);
+    updateBestTime(scores);
   }
 
   // ==========================================
@@ -1454,19 +1529,18 @@
     resetGame();
   }
 
-  function handleSaveScore() {
+  async function handleSaveScore() {
     playSound('click');
     const entry = {
       name: currentPilotName,
       timeMs: totalSurvivalMs,
       apples: applesEaten,
       score: score,
+      hazardLevel: hazardLevel,
       date: new Date().toISOString().split('T')[0]
     };
-    saveScore(entry);
     resultScreen.classList.add('hidden');
-    rankNotice.textContent = `⚡ ${currentPilotName} 파일럿의 기록(${formatTime(totalSurvivalMs)})이 랭킹에 등록되었습니다!`;
-    setTimeout(() => { rankNotice.textContent = ''; }, 4000);
+    await saveScore(entry);
     resetGame();
   }
 
@@ -1528,8 +1602,7 @@
   } catch (e) {}
 
   updateAudioButtons();
-  renderScores();
-  updateBestTime();
+  loadAndRenderScores();
 
   // 초기 렌더링 시작
   animFrameId = requestAnimationFrame(mainLoop);

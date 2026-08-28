@@ -1,0 +1,17 @@
+{
+  "name": "neon-worm-survival",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cyberpunk Neon Worm Survival Arcade with Supabase Leaderboard",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1"
+  },
+  "devDependencies": {
+    "vercel": "^46.0.0"
+  }
+}
