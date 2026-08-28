@@ -45,6 +45,8 @@
   const resultTitle = document.querySelector('#resultTitle');
   const resultTime = document.querySelector('#resultTime');
   const resultDetails = document.querySelector('#resultDetails');
+  const resultPlayerName = document.querySelector('#resultPlayerName');
+  const resultNameError = document.querySelector('#resultNameError');
   const saveScoreBtn = document.querySelector('#saveScoreBtn');
   const skipScoreBtn = document.querySelector('#skipScoreBtn');
 
@@ -65,13 +67,34 @@
   const btnBoost = document.querySelector('#btnBoost');
 
   // ==========================================
-  // 2. 게임 설정 & 상수
+  // 2. 게임 설정 & Supabase 글로벌 랭킹 설정
   // ==========================================
   const COLS = 22;
   const ROWS = 22;
   const CELL_SIZE = mainCanvas.width / COLS; // 440 / 22 = 20px
   const STORAGE_KEY = 'neon-worm-survival-v1';
   const PLAYER_NAME_KEY = 'neon-worm-last-pilot';
+
+  // 💡 [클라이언트 직접 연동] Supabase 대시보드 (Project Settings > API)의 URL과 anon key를 넣으면
+  // Vercel 배포 없이 파일(file:///)을 더블클릭해서 실행해도 실시간 글로벌 랭킹이 100% 작동합니다!
+  const SUPABASE_URL = ''; // e.g., 'https://your-project.supabase.co'
+  const SUPABASE_ANON_KEY = ''; // e.g., 'eyJhbGciOiJIUzI1Ni...'
+  const SUPABASE_TABLE = 'neon_worm_leaderboard';
+
+  let directSupabase = null;
+  try {
+    if (
+      typeof window.supabase !== 'undefined' &&
+      SUPABASE_URL &&
+      SUPABASE_URL.startsWith('http') &&
+      !SUPABASE_URL.includes('your-project')
+    ) {
+      directSupabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      console.log('⚡ Direct Supabase connection active.');
+    }
+  } catch (e) {
+    console.warn('Direct Supabase connection fallback:', e);
+  }
 
   // ==========================================
   // 3. Web Audio API 신스 엔진 (BGM & SFX)
@@ -379,12 +402,40 @@
   }
 
   async function fetchLeaderboardScores() {
-    // 1. 서버리스 API 엔드포인트 (/api/leaderboard) 호출 시도 (.env 환경변수 기반)
+    // 1. Direct Supabase Client가 설정되어 있다면 가장 먼저 시도 (file:/// 에서도 완벽 동작)
+    if (directSupabase) {
+      try {
+        const { data, error } = await directSupabase
+          .from(SUPABASE_TABLE)
+          .select('name, time_ms, apples, score, hazard_level, played_at')
+          .order('time_ms', { ascending: false })
+          .order('apples', { ascending: false })
+          .order('played_at', { ascending: true })
+          .limit(10);
+
+        if (!error && data && data.length > 0) {
+          const formatted = data.map(item => ({
+            name: item.name,
+            timeMs: item.time_ms,
+            apples: item.apples ?? 0,
+            score: item.score ?? 0,
+            hazardLevel: item.hazard_level ?? 1,
+            date: item.played_at ? item.played_at.split('T')[0] : ''
+          }));
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(formatted)); } catch (e) {}
+          return formatted;
+        }
+      } catch (err) {
+        console.warn('Direct Supabase fetch error:', err);
+      }
+    }
+
+    // 2. 서버리스 API 엔드포인트 (/api/leaderboard) 호출 시도 (.env 환경변수 기반)
     try {
       const response = await fetch('/api/leaderboard', { cache: 'no-store' });
       if (response.ok) {
         const result = await response.json();
-        if (result && Array.isArray(result.scores)) {
+        if (result && Array.isArray(result.scores) && result.scores.length > 0) {
           const formatted = result.scores.map(item => ({
             name: item.name,
             timeMs: item.time_ms,
@@ -407,7 +458,40 @@
   async function saveScore(entry) {
     let resultMsg = '';
 
-    // 1. 서버리스 API 엔드포인트 (/api/leaderboard) 호출 시도
+    // 1. Direct Supabase Client 연동 (RPC 함수 save_neon_worm_score 호출)
+    if (directSupabase) {
+      try {
+        rankNotice.textContent = '📡 Supabase 서버에 생존 기록 동기화 중…';
+        const { data, error } = await directSupabase.rpc('save_neon_worm_score', {
+          p_name: entry.name,
+          p_time_ms: entry.timeMs,
+          p_apples: entry.apples,
+          p_score: entry.score,
+          p_hazard_level: entry.hazardLevel || hazardLevel || 1
+        });
+
+        if (!error && data) {
+          if (data.status === 'inserted') {
+            resultMsg = `🏆 ${entry.name} 파일럿 신규 랭킹 등록 완료! (${formatTime(entry.timeMs)})`;
+          } else if (data.status === 'updated') {
+            resultMsg = `🔥 ${entry.name} 파일럿 최고 생존 기록 갱신! (${formatTime(entry.timeMs)})`;
+          } else if (data.status === 'kept') {
+            resultMsg = `ℹ️ ${entry.name} 파일럿의 기존 최고 기록(${formatTime(data.time_ms)})이 더 높아 유지되었습니다.`;
+          } else {
+            resultMsg = `⚡ ${entry.name} 파일럿의 기록이 Supabase에 성공적으로 저장되었습니다!`;
+          }
+
+          rankNotice.textContent = resultMsg;
+          setTimeout(() => { rankNotice.textContent = ''; }, 4500);
+          await loadAndRenderScores();
+          return;
+        }
+      } catch (err) {
+        console.warn('Direct Supabase save error:', err);
+      }
+    }
+
+    // 2. 서버리스 API 엔드포인트 (/api/leaderboard) 호출 시도 (Vercel 배포 환경)
     try {
       rankNotice.textContent = '📡 Supabase 서버에 생존 기록 동기화 중…';
       const response = await fetch('/api/leaderboard', {
@@ -443,7 +527,7 @@
       // API 통신 불가 시 로컬스토리지 모드로 처리
     }
 
-    // 2. 로컬스토리지 폴백 저장
+    // 3. 로컬스토리지 폴백 저장
     saveLocalScore(entry);
     resultMsg = `⚡ ${entry.name} 파일럿의 기록(${formatTime(entry.timeMs)})이 로컬에 등록되었습니다!`;
     rankNotice.textContent = resultMsg;
@@ -459,10 +543,11 @@
     }
 
     scores.forEach((item, index) => {
+      const isMe = currentPilotName && item.name && item.name.toUpperCase() === currentPilotName.toUpperCase();
       const li = document.createElement('li');
-      li.className = 'rank-row';
+      li.className = isMe ? 'rank-row active-pilot' : 'rank-row';
       li.innerHTML = `
-        <span class="p-name" title="${item.name}">${item.name}</span>
+        <span class="p-name" title="${item.name}">${item.name || 'PILOT'}${isMe ? ' ◀ ME' : ''}</span>
         <span class="p-time">${formatTime(item.timeMs)}</span>
         <span class="p-apples">${item.apples ?? item.score ?? 0}</span>
       `;
@@ -930,6 +1015,11 @@
     const survivedStr = formatTime(totalSurvivalMs);
     resultTime.textContent = survivedStr;
     resultDetails.textContent = `SCORE: ${score.toLocaleString()} · APPLES: ${applesEaten} · LEVEL: ${hazardLevel}`;
+
+    if (resultPlayerName) {
+      resultPlayerName.value = currentPilotName || 'NEON_RUNNER';
+      if (resultNameError) resultNameError.textContent = '';
+    }
 
     const isNewRecord = personalBestMs === null || totalSurvivalMs > personalBestMs;
     resultKicker.textContent = isNewRecord ? '🏆 NEW RECORD!' : 'SIGNAL LOST';
@@ -1521,6 +1611,7 @@
       return;
     }
     currentPilotName = val;
+    if (resultPlayerName) resultPlayerName.value = currentPilotName;
     try {
       localStorage.setItem(PLAYER_NAME_KEY, currentPilotName);
     } catch (e) {}
@@ -1531,6 +1622,21 @@
 
   async function handleSaveScore() {
     playSound('click');
+    const inputVal = (resultPlayerName ? resultPlayerName.value : currentPilotName || '').trim().toUpperCase();
+    if (!inputVal) {
+      if (resultNameError) resultNameError.textContent = '닉네임을 입력해 주세요!';
+      return;
+    }
+    if (inputVal.length < 2) {
+      if (resultNameError) resultNameError.textContent = '2글자 이상 입력해 주세요.';
+      return;
+    }
+    currentPilotName = inputVal;
+    if (playerNameInput) playerNameInput.value = currentPilotName;
+    try {
+      localStorage.setItem(PLAYER_NAME_KEY, currentPilotName);
+    } catch (e) {}
+
     const entry = {
       name: currentPilotName,
       timeMs: totalSurvivalMs,

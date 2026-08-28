@@ -533,6 +533,18 @@ li.rank-row:hover {
   background: rgba(52, 231, 255, 0.05);
 }
 
+li.rank-row.active-pilot {
+  background: rgba(52, 231, 255, 0.12) !important;
+  border-left: 3px solid var(--cyan);
+  padding-left: 2px;
+}
+
+li.rank-row.active-pilot .p-name {
+  color: var(--cyan) !important;
+  font-weight: 700;
+  text-shadow: 0 0 8px rgba(52, 231, 255, 0.6);
+}
+
 li.rank-row:not(.empty)::before {
   content: counter(rank, decimal-leading-zero);
   color: var(--pink);

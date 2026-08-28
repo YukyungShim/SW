@@ -138,9 +138,15 @@
                 <p id="resultTime" class="result-time">00:00.00</p>
               </div>
               <p id="resultDetails" class="result-details">SCORE: 0000 · APPLES: 0 · LEVEL: 01</p>
-              <p id="resultPrompt" class="result-prompt">이 생존 기록을 네온 랭킹에 등록하시겠습니까?</p>
+              
+              <div class="result-pilot-field" style="margin: 12px 0 8px; text-align: left;">
+                <label for="resultPlayerName" style="font-size: 10px; color: var(--cyan); display: block; margin-bottom: 4px; font-weight: bold;">등록할 파일럿 닉네임</label>
+                <input id="resultPlayerName" maxlength="12" placeholder="PILOT_NAME" autocomplete="nickname" style="width: 100%; box-sizing: border-box;" />
+                <p id="resultNameError" class="name-error" role="alert"></p>
+              </div>
+
               <div class="result-actions">
-                <button id="saveScoreBtn" type="button" class="btn-main">랭킹 등록</button>
+                <button id="saveScoreBtn" type="button" class="btn-main">랭킹 등록 [ENTER]</button>
                 <button id="skipScoreBtn" type="button" class="btn-pink">새로 시작</button>
               </div>
             </div>
