@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#080b1d" />
+    <title>NEON WORM // Cyber Survival Arcade</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- 상단 글로벌 툴바 (오디오 컨트롤) -->
+    <nav class="top-bar">
+      <div class="brand-tag">
+        <span class="pulse-dot"></span> SURVIVAL WARM // V1.0
+      </div>
+      <div class="audio-controls">
+        <button id="bgmToggleBtn" type="button" class="btn-audio active" title="배경음악 켜기/끄기">🎵 BGM ON</button>
+        <button id="sfxToggleBtn" type="button" class="btn-audio active" title="효과음 켜기/끄기">🔊 SFX ON</button>
+        <button id="muteAllBtn" type="button" class="btn-audio" title="전체 음소거">🔇 MUTE ALL</button>
+      </div>
+    </nav>
+
+    <main class="app">
+      <!-- 1. 좌측 패널 (Worm Stats, Radar, Controls) -->
+      <aside class="neon-panel left-panel">
+        <!-- 현재 지렁이 상태 박스 -->
+        <div class="preview-box">
+          <div class="box-header">
+            <span>WORM TELEMETRY</span>
+          </div>
+          <div class="telemetry-grid">
+            <div class="tele-item">
+              <span class="tele-label">BODY LEN</span>
+              <strong id="teleLength" class="tele-val">3</strong>
+            </div>
+            <div class="tele-item">
+              <span class="tele-label">SPEED</span>
+              <strong id="teleSpeed" class="tele-val">1.0x</strong>
+            </div>
+            <div class="tele-item">
+              <span class="tele-label">FOOD DIST</span>
+              <strong id="teleDist" class="tele-val">--</strong>
+            </div>
+            <div class="tele-item">
+              <span class="tele-label">APPLES</span>
+              <strong id="teleApples" class="tele-val">0</strong>
+            </div>
+            <div class="tele-item">
+              <span class="tele-label">HAZARD OBS</span>
+              <strong id="teleObstacles" class="tele-val">0</strong>
+            </div>
+            <div class="tele-item">
+              <span class="tele-label">HUNTER AI</span>
+              <strong id="teleHunter" class="tele-val text-green">STANDBY</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- 미니 레이더 프리뷰 -->
+        <div class="preview-box">
+          <div class="box-header">
+            <span>TARGET RADAR</span>
+          </div>
+          <canvas id="radarCanvas" class="preview-canvas" width="120" height="120"></canvas>
+        </div>
+
+        <!-- 조작 안내 가이드 -->
+        <div class="controls-guide">
+          <h3>CONTROLS</h3>
+          <div class="key-row"><span>이동</span><span class="key-tag">↑ ↓ ← → / WASD</span></div>
+          <div class="key-row"><span>부스트(가속)</span><span class="key-tag">SPACE (홀드)</span></div>
+          <div class="key-row"><span>일시정지</span><span class="key-tag">P / ESC</span></div>
+          <div class="key-row"><span>새 게임</span><span class="key-tag">R</span></div>
+        </div>
+
+        <!-- 생존 팁 -->
+        <div class="survival-tip">
+          <span class="tip-title">⚡ SURVIVAL PROTOCOL</span>
+          <p>시간이 지나면 <strong>위험 장애물(오렌지 블록)</strong>이 생성되고, 중후반에는 플레이어를 추적하는 <strong>적 사이버 헌터 뱀(레드)</strong>이 출현합니다! 레이더를 확인하며 피하세요.</p>
+        </div>
+      </aside>
+
+      <!-- 2. 중앙 메인 패널 (메인 보드 & HUD) -->
+      <section class="neon-panel center-panel">
+        <header>
+          <div>
+            <p class="eyebrow">ARCADE // SURVIVAL PROTOCOL</p>
+            <h1>NEON WORM</h1>
+          </div>
+          <div class="score-box">
+            <span class="label">BEST SURVIVAL</span>
+            <strong id="bestTimeDisplay" class="value">00:00.00</strong>
+          </div>
+        </header>
+
+        <!-- 실시간 생존 타이머 & 스탯 뱃지 -->
+        <div class="stage-badge-container">
+          <div class="badge-card highlight-time">
+            <span class="b-label">SURVIVAL TIME</span>
+            <span id="timeDisplay" class="b-val glow-cyan">00:00.00</span>
+          </div>
+          <div class="badge-card target">
+            <span class="b-label">APPLES / SCORE</span>
+            <span id="scoreDisplay" class="b-val">00000</span>
+          </div>
+          <div class="badge-card">
+            <span class="b-label">HAZARD LEVEL</span>
+            <span id="levelDisplay" class="b-val">LV.01</span>
+          </div>
+        </div>
+
+        <!-- 메인 캔버스 영역 -->
+        <div class="canvas-wrapper">
+          <canvas id="mainCanvas" width="440" height="440" aria-label="네온 지렁이 서바이벌 보드"></canvas>
+
+          <!-- 시작 화면 모달 -->
+          <div id="startScreen" class="overlay-screen">
+            <div class="modal-card">
+              <p class="eyebrow">PILOT IDENTIFICATION</p>
+              <h2>CYBER WORM</h2>
+              <p class="modal-desc">네온 사이버 스페이스에서 최대한 오래 살아남으세요.</p>
+              <label for="playerName">파일럿 닉네임</label>
+              <input id="playerName" maxlength="12" placeholder="NEON_RUNNER" autocomplete="nickname" autofocus />
+              <button id="startGameBtn" type="button" class="btn-main" style="width: 100%; margin-top: 14px;">생존 시작 [ENTER]</button>
+              <p id="nameError" class="name-error" role="alert"></p>
+            </div>
+          </div>
+
+          <!-- 게임 오버 결과 모달 -->
+          <div id="resultScreen" class="overlay-screen hidden">
+            <div class="modal-card">
+              <p id="resultKicker" class="eyebrow">SIGNAL LOST</p>
+              <h2 id="resultTitle">GAME OVER</h2>
+              <div class="result-time-box">
+                <span class="result-time-label">SURVIVED FOR</span>
+                <p id="resultTime" class="result-time">00:00.00</p>
+              </div>
+              <p id="resultDetails" class="result-details">SCORE: 0000 · APPLES: 0 · LEVEL: 01</p>
+              <p id="resultPrompt" class="result-prompt">이 생존 기록을 네온 랭킹에 등록하시겠습니까?</p>
+              <div class="result-actions">
+                <button id="saveScoreBtn" type="button" class="btn-main">랭킹 등록</button>
+                <button id="skipScoreBtn" type="button" class="btn-pink">새로 시작</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 하단 상태 및 제어 버튼 -->
+        <div class="status-bar">
+          <span id="statusMessage" class="msg">방향키 또는 WASD로 생존을 시작하세요.</span>
+          <div class="btn-group">
+            <button id="pauseBtn" type="button">PAUSE</button>
+            <button id="restartBtn" type="button" class="btn-pink">RESTART</button>
+          </div>
+        </div>
+
+        <!-- 모바일 가상 온스크린 패드 (D-PAD) -->
+        <div class="mobile-controls">
+          <div></div>
+          <button id="btnMvUp" class="d-pad-btn" type="button">▲</button>
+          <div></div>
+          <button id="btnMvLeft" class="d-pad-btn" type="button">◀</button>
+          <button id="btnBoost" class="d-pad-btn btn-yellow" type="button">⚡</button>
+          <button id="btnMvRight" class="d-pad-btn" type="button">▶</button>
+          <div></div>
+          <button id="btnMvDown" class="d-pad-btn" type="button">▼</button>
+          <div></div>
+        </div>
+      </section>
+
+      <!-- 3. 우측 랭킹 패널 (생존 시간 랭킹) -->
+      <aside class="neon-panel leaderboard-panel">
+        <div class="lb-header-row">
+          <div>
+            <p class="eyebrow">HALL OF SURVIVORS</p>
+            <h2>RANKING</h2>
+          </div>
+          <button id="resetRankBtn" type="button" class="btn-sm" title="랭킹 초기화">RESET</button>
+        </div>
+        <p class="lb-subtitle">살아남은 시간 기준 상위 파일럿 TOP 10</p>
+        
+        <div class="rank-table-header">
+          <span>#</span>
+          <span>PILOT</span>
+          <span>TIME</span>
+          <span>APPLE</span>
+        </div>
+
+        <ol id="rankingList" class="ranking-list">
+          <li class="empty">기록을 불러오는 중…</li>
+        </ol>
+        
+        <p id="rankNotice" class="notice"></p>
+      </aside>
+    </main>
+
+    <script src="worm.js"></script>
+  </body>
+</html>
