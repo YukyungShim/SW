@@ -458,36 +458,69 @@
   async function saveScore(entry) {
     let resultMsg = '';
 
-    // 1. Direct Supabase Client 연동 (RPC 함수 save_neon_worm_score 호출)
+    // 1. Direct Supabase Client 연동 (표준 테이블 Select -> Insert / Update, RPC 함수 불필요)
     if (directSupabase) {
       try {
         rankNotice.textContent = '📡 Supabase 서버에 생존 기록 동기화 중…';
-        const { data, error } = await directSupabase.rpc('save_neon_worm_score', {
-          p_name: entry.name,
-          p_time_ms: entry.timeMs,
-          p_apples: entry.apples,
-          p_score: entry.score,
-          p_hazard_level: entry.hazardLevel || hazardLevel || 1
-        });
 
-        if (!error && data) {
-          if (data.status === 'inserted') {
-            resultMsg = `🏆 ${entry.name} 파일럿 신규 랭킹 등록 완료! (${formatTime(entry.timeMs)})`;
-          } else if (data.status === 'updated') {
-            resultMsg = `🔥 ${entry.name} 파일럿 최고 생존 기록 갱신! (${formatTime(entry.timeMs)})`;
-          } else if (data.status === 'kept') {
-            resultMsg = `ℹ️ ${entry.name} 파일럿의 기존 최고 기록(${formatTime(data.time_ms)})이 더 높아 유지되었습니다.`;
-          } else {
-            resultMsg = `⚡ ${entry.name} 파일럿의 기록이 Supabase에 성공적으로 저장되었습니다!`;
-          }
+        const { data: existingUser, error: checkError } = await directSupabase
+          .from(SUPABASE_TABLE)
+          .select('*')
+          .ilike('name', entry.name)
+          .maybeSingle();
 
-          rankNotice.textContent = resultMsg;
-          setTimeout(() => { rankNotice.textContent = ''; }, 4500);
-          await loadAndRenderScores();
-          return;
+        if (checkError) throw checkError;
+
+        let status = 'inserted';
+        let prevTime = 0;
+
+        if (!existingUser) {
+          const { error: insertError } = await directSupabase
+            .from(SUPABASE_TABLE)
+            .insert({
+              name: entry.name,
+              time_ms: entry.timeMs,
+              apples: entry.apples,
+              score: entry.score,
+              hazard_level: entry.hazardLevel || hazardLevel || 1,
+              played_at: new Date().toISOString()
+            });
+
+          if (insertError) throw insertError;
+          status = 'inserted';
+        } else if (entry.timeMs > existingUser.time_ms) {
+          const { error: updateError } = await directSupabase
+            .from(SUPABASE_TABLE)
+            .update({
+              time_ms: entry.timeMs,
+              apples: entry.apples,
+              score: entry.score,
+              hazard_level: entry.hazardLevel || hazardLevel || 1,
+              played_at: new Date().toISOString()
+            })
+            .ilike('name', entry.name);
+
+          if (updateError) throw updateError;
+          status = 'updated';
+        } else {
+          status = 'kept';
+          prevTime = existingUser.time_ms;
         }
+
+        if (status === 'inserted') {
+          resultMsg = `🏆 ${entry.name} 파일럿 신규 랭킹 등록 완료! (${formatTime(entry.timeMs)})`;
+        } else if (status === 'updated') {
+          resultMsg = `🔥 ${entry.name} 파일럿 최고 생존 기록 갱신! (${formatTime(entry.timeMs)})`;
+        } else {
+          resultMsg = `ℹ️ ${entry.name} 파일럿의 기존 최고 기록(${formatTime(prevTime)})이 더 높아 유지되었습니다.`;
+        }
+
+        rankNotice.textContent = resultMsg;
+        setTimeout(() => { rankNotice.textContent = ''; }, 4500);
+        await loadAndRenderScores();
+        return;
       } catch (err) {
-        console.warn('Direct Supabase save error:', err);
+        console.warn('Direct Supabase save error, falling back:', err);
       }
     }
 
