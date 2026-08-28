@@ -512,10 +512,12 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: entry.name,
-          timeMs: entry.timeMs,
-          apples: entry.apples,
-          score: entry.score,
-          hazardLevel: entry.hazardLevel || hazardLevel || 1
+          timeMs: Math.round(entry.timeMs || 0),
+          time_ms: Math.round(entry.timeMs || 0),
+          apples: Math.round(entry.apples || 0),
+          score: Math.round(entry.score || 0),
+          hazardLevel: Math.round(entry.hazardLevel || hazardLevel || 1),
+          hazard_level: Math.round(entry.hazardLevel || hazardLevel || 1)
         })
       });
 
@@ -1652,10 +1654,10 @@
 
     const entry = {
       name: currentPilotName,
-      timeMs: totalSurvivalMs,
-      apples: applesEaten,
-      score: score,
-      hazardLevel: hazardLevel,
+      timeMs: Math.round(totalSurvivalMs),
+      apples: Math.round(applesEaten),
+      score: Math.round(score),
+      hazardLevel: Math.round(hazardLevel),
       date: new Date().toISOString().split('T')[0]
     };
     resultScreen.classList.add('hidden');

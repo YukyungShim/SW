@@ -7,16 +7,19 @@ const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabase
 // 네온 웜 서바이벌 테이블명
 const PRIMARY_TABLE = process.env.WORM_TABLE || 'neon_worm_leaderboard';
 
-function validTime(value) {
-  return Number.isInteger(value) && value >= 0 && value <= 86_400_000; // 최대 24시간
-}
-
 function sanitizeName(value) {
   return String(value || '').trim().slice(0, 12).replace(/[<>]/g, '');
 }
 
 export default async function handler(request, response) {
   response.setHeader('Cache-Control', 'no-store');
+  response.setHeader('Access-Control-Allow-Origin', '*');
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (request.method === 'OPTIONS') {
+    return response.status(200).end();
+  }
 
   if (!supabase) {
     return response.status(503).json({ error: 'Supabase URL or Key is not configured in .env' });
@@ -37,17 +40,20 @@ export default async function handler(request, response) {
         .order('played_at', { ascending: true })
         .limit(10);
 
-      if (topError) throw topError;
+      if (topError) {
+        console.error('Supabase SELECT error:', topError);
+        return response.status(500).json({ error: topError.message });
+      }
 
       let personalBest = null;
       if (name) {
-        const { data: userData, error: userError } = await supabase
+        const { data: userData } = await supabase
           .from(PRIMARY_TABLE)
-          .select('time_ms, apples, score, hazard_level')
+          .select('time_ms')
           .ilike('name', name)
           .maybeSingle();
 
-        if (!userError && userData) {
+        if (userData) {
           personalBest = userData.time_ms;
         }
       }
@@ -62,25 +68,42 @@ export default async function handler(request, response) {
     // POST: 생존 기록 등록 및 최고기록 자동 갱신
     // -----------------------------------------------------------
     if (request.method === 'POST') {
-      const body = typeof request.body === 'string' ? JSON.parse(request.body) : request.body || {};
-      const { name, timeMs, apples = 0, score = 0, hazardLevel = 1 } = body;
+      let body = request.body;
+      if (typeof body === 'string') {
+        try {
+          body = JSON.parse(body);
+        } catch (e) {
+          return response.status(400).json({ error: 'Invalid JSON body.' });
+        }
+      }
+      body = body || {};
+
+      const name = body.name;
+      const rawTime = body.timeMs ?? body.time_ms ?? body.time ?? 0;
+      const rawApples = body.apples ?? 0;
+      const rawScore = body.score ?? 0;
+      const rawLevel = body.hazardLevel ?? body.hazard_level ?? 1;
 
       const cleanName = sanitizeName(name);
-      const numericTime = Number(timeMs);
-      const numericApples = Number(apples) || 0;
-      const numericScore = Number(score) || 0;
-      const numericLevel = Number(hazardLevel) || 1;
+      const numericTime = Math.max(0, Math.round(Number(rawTime) || 0));
+      const numericApples = Math.max(0, Math.round(Number(rawApples) || 0));
+      const numericScore = Math.max(0, Math.round(Number(rawScore) || 0));
+      const numericLevel = Math.max(1, Math.round(Number(rawLevel) || 1));
 
-      if (!cleanName || !validTime(numericTime)) {
-        return response.status(400).json({ error: 'Invalid pilot name or survival time.' });
+      if (!cleanName) {
+        return response.status(400).json({ error: 'Pilot name is required.' });
       }
 
       // 기존 닉네임 기록 조회
-      const { data: existingUser } = await supabase
+      const { data: existingUser, error: checkError } = await supabase
         .from(PRIMARY_TABLE)
         .select('time_ms')
         .ilike('name', cleanName)
         .maybeSingle();
+
+      if (checkError) {
+        console.warn('Supabase Check Warning:', checkError);
+      }
 
       const recordData = {
         name: cleanName,
@@ -95,12 +118,15 @@ export default async function handler(request, response) {
       let finalBest = numericTime;
 
       // 신규 유저이거나 이전 최고기록보다 높은 경우 upsert 실행
-      if (!existingUser || numericTime > existingUser.time_ms) {
+      if (!existingUser || numericTime > (existingUser.time_ms || 0)) {
         const { error: upsertError } = await supabase
           .from(PRIMARY_TABLE)
           .upsert(recordData, { onConflict: 'name' });
 
-        if (upsertError) throw upsertError;
+        if (upsertError) {
+          console.error('Supabase UPSERT Error:', upsertError);
+          return response.status(500).json({ error: upsertError.message });
+        }
         status = existingUser ? 'updated' : 'inserted';
       } else {
         status = 'kept';
@@ -116,7 +142,9 @@ export default async function handler(request, response) {
         .order('played_at', { ascending: true })
         .limit(10);
 
-      if (fetchError) throw fetchError;
+      if (fetchError) {
+        console.warn('Supabase Refresh Warning:', fetchError);
+      }
 
       return response.status(201).json({
         status,
@@ -126,7 +154,7 @@ export default async function handler(request, response) {
       });
     }
 
-    response.setHeader('Allow', 'GET, POST');
+    response.setHeader('Allow', 'GET, POST, OPTIONS');
     return response.status(405).json({ error: 'Method not allowed.' });
   } catch (error) {
     console.error('Supabase Leaderboard API Error:', error);
